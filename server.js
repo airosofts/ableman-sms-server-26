@@ -207,8 +207,8 @@ async function getMondayItems(config) {
   return allItems;
 }
 
-// Send SMS using OpenPhone API
-async function sendSMS(phoneNumber, message, config) {
+// Send SMS via OpenPhone API
+async function sendSMSViaOpenPhone(phoneNumber, message, config) {
   try {
     console.log(`Attempting to send SMS to ${phoneNumber} using OpenPhone API`);
 
@@ -284,8 +284,76 @@ async function sendSMS(phoneNumber, message, config) {
   }
 }
 
+// Send SMS via Airophone API
+async function sendSMSViaAirophone(phoneNumber, message, config) {
+  try {
+    console.log(`Attempting to send SMS to ${phoneNumber} using Airophone API`);
+
+    const payload = {
+      to: phoneNumber,
+      message: message
+    };
+    if (config.airophone_phone) {
+      payload.from = config.airophone_phone;
+    }
+
+    const response = await axios({
+      method: 'post',
+      url: 'https://ap.airosofts.com/api/external/sms/send',
+      headers: {
+        'Authorization': `Bearer ${config.airophone_api_key}`,
+        'Content-Type': 'application/json'
+      },
+      data: payload,
+      timeout: 30000
+    });
+
+    console.log(`SMS sent successfully to ${phoneNumber} via Airophone. Response:`, response.data);
+    return { success: true, data: response.data };
+
+  } catch (error) {
+    console.error(`Airophone SMS sending failed to ${phoneNumber}:`);
+
+    let errorMessage = 'Unknown error';
+    let errorDetails = {};
+
+    if (error.response) {
+      errorDetails = { status: error.response.status, data: error.response.data };
+      switch (error.response.status) {
+        case 401:
+          errorMessage = 'Unauthorized: Invalid Airophone API key';
+          break;
+        case 402:
+          errorMessage = 'Payment Required: Insufficient Airophone credits';
+          break;
+        case 429:
+          errorMessage = 'Rate Limited: Too many Airophone requests';
+          break;
+        default:
+          errorMessage = `HTTP ${error.response.status}: ${error.response.data?.message || error.response.statusText}`;
+      }
+    } else if (error.request) {
+      errorMessage = 'Network Error: No response from Airophone API';
+      errorDetails = { request: 'No response received' };
+    } else {
+      errorMessage = `Request Setup Error: ${error.message}`;
+      errorDetails = { message: error.message };
+    }
+
+    return { success: false, error: errorMessage, details: errorDetails };
+  }
+}
+
+// Send SMS - routes to configured provider
+async function sendSMS(phoneNumber, message, config) {
+  if (config.sms_provider === 'airophone') {
+    return sendSMSViaAirophone(phoneNumber, message, config);
+  }
+  return sendSMSViaOpenPhone(phoneNumber, message, config);
+}
+
 // Save message to message_logs table
-async function saveMessageLog(campaignId, executionId, recipientPhone, recipientName, messageContent, status, errorMessage = null, providerId = null) {
+async function saveMessageLog(campaignId, executionId, recipientPhone, recipientName, messageContent, status, errorMessage = null, providerId = null, provider = 'openphone') {
   try {
     const logData = {
       campaign_id: campaignId,
@@ -294,7 +362,7 @@ async function saveMessageLog(campaignId, executionId, recipientPhone, recipient
       recipient_name: recipientName,
       message_content: messageContent,
       status: status,
-      sms_provider: 'openphone',
+      sms_provider: provider,
       sent_at: status === 'sent' ? new Date().toISOString() : null
     };
 
@@ -334,9 +402,16 @@ async function executeCampaign(campaign, executionId, scheduleId = null, schedul
 
     const config = campaign.user_configs;
 
-    // Verify OpenPhone configuration
-    if (!config.openphone_api_key || !config.sender_phone) {
-      throw new Error('OpenPhone API key or sender phone not configured');
+    // Verify SMS provider configuration
+    const provider = config.sms_provider || 'openphone';
+    if (provider === 'airophone') {
+      if (!config.airophone_api_key) {
+        throw new Error('Airophone API key not configured');
+      }
+    } else {
+      if (!config.openphone_api_key || !config.sender_phone) {
+        throw new Error('OpenPhone API key or sender phone not configured');
+      }
     }
 
     // Fetch Monday.com items
@@ -438,7 +513,8 @@ async function executeCampaign(campaign, executionId, scheduleId = null, schedul
         processedMessage,
         result.success ? 'sent' : 'failed',
         result.success ? null : result.error,
-        result.success && result.data ? result.data.id : null
+        result.success && result.data ? result.data.id : null,
+        config.sms_provider || 'openphone'
       );
 
       if (result.success) {
