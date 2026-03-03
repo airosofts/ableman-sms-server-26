@@ -724,14 +724,23 @@ cron.schedule('* * * * *', async () => {
         if (shouldExecute) {
           console.log(`[CRON] Executing campaign: ${campaign.campaign_name} (Schedule ID: ${schedule.id}, Type: ${schedule.schedule_type})`);
 
-          // Update schedule execution tracking BEFORE execution
-          await supabase
+          // ATOMIC CLAIM: Only update if last_executed_at is still null.
+          // This prevents double-execution when multiple smsserver instances run simultaneously.
+          const { data: claimed } = await supabase
             .from('campaign_schedules')
             .update({
               last_executed_at: new Date().toISOString(),
               execution_count: (schedule.execution_count || 0) + 1
             })
-            .eq('id', schedule.id);
+            .eq('id', schedule.id)
+            .is('last_executed_at', null)  // only win if not yet claimed
+            .select()
+            .single();
+
+          if (!claimed) {
+            console.log(`[CRON] Schedule already claimed by another instance, skipping: ${campaign.campaign_name}`);
+            continue;
+          }
 
           // Create execution record
           const { data: execution } = await supabase
@@ -841,6 +850,6 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
   console.log(`SMS Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`SMS Provider: OpenPhone`);
+  console.log(`SMS Provider: OpenPhone + Airophone`);
   console.log(`Timezone: America/New_York (EST)`);
 });
