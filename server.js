@@ -299,7 +299,7 @@ async function sendSMSViaAirophone(phoneNumber, message, config) {
 
     const response = await axios({
       method: 'post',
-      url: 'https://ap.airosofts.com/api/external/sms/send',
+      url: 'https://app.airophone.com/api/external/sms/send',
       headers: {
         'Authorization': `Bearer ${config.airophone_api_key}`,
         'Content-Type': 'application/json'
