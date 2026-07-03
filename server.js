@@ -289,13 +289,19 @@ async function sendSMSViaAirophone(phoneNumber, message, config) {
   try {
     console.log(`Attempting to send SMS to ${phoneNumber} using Airophone API`);
 
+    if (!config.airophone_phone) {
+      return {
+        success: false,
+        error: 'Airophone sender number (airophone_phone) is not configured. Set it in Configurations.',
+        details: { missingField: 'airophone_phone' }
+      };
+    }
+
     const payload = {
+      from: config.airophone_phone,
       to: phoneNumber,
       message: message
     };
-    if (config.airophone_phone) {
-      payload.from = config.airophone_phone;
-    }
 
     const response = await axios({
       method: 'post',
@@ -330,7 +336,7 @@ async function sendSMSViaAirophone(phoneNumber, message, config) {
           errorMessage = 'Rate Limited: Too many Airophone requests';
           break;
         default:
-          errorMessage = `HTTP ${error.response.status}: ${error.response.data?.message || error.response.statusText}`;
+          errorMessage = `HTTP ${error.response.status}: ${error.response.data?.error || error.response.data?.message || error.response.statusText}`;
       }
     } else if (error.request) {
       errorMessage = 'Network Error: No response from Airophone API';
